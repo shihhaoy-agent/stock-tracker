@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock Tracker — Daily % Change</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+
+  header { background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  #status { font-size: 12px; color: #8b949e; }
+  #status span { color: #3fb950; font-weight: 500; }
+
+  .controls { padding: 16px 24px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+  .tabs { display: flex; gap: 4px; }
+  .tab { padding: 6px 16px; border-radius: 6px; border: 1px solid #30363d; background: transparent; color: #8b949e; cursor: pointer; font-size: 13px; transition: all .15s; }
+  .tab.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .tab:hover:not(.active) { background: #21262d; color: #e6edf3; }
+
+  #search { padding: 6px 12px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; font-size: 13px; width: 220px; outline: none; }
+  #search:focus { border-color: #1f6feb; }
+
+  #meta { margin-left: auto; font-size: 12px; color: #8b949e; }
+
+  .table-wrap { overflow-x: auto; padding: 0 24px 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { position: sticky; top: 57px; background: #161b22; padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #30363d; cursor: pointer; white-space: nowrap; user-select: none; }
+  thead th:hover { color: #e6edf3; }
+  thead th.sorted { color: #58a6ff; }
+  thead th .arrow { margin-left: 4px; opacity: .6; }
+
+  tbody tr { border-bottom: 1px solid #21262d; transition: background .1s; }
+  tbody tr:hover { background: #161b22; }
+  td { padding: 10px 12px; white-space: nowrap; }
+
+  .rank { color: #8b949e; font-size: 12px; width: 40px; }
+  .ticker { font-weight: 600; font-size: 13px; color: #58a6ff; }
+  .name { color: #8b949e; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  .price { font-variant-numeric: tabular-nums; }
+  .chg { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chg.up { color: #3fb950; }
+  .chg.down { color: #f85149; }
+  .chg.flat { color: #8b949e; }
+  .bar-cell { width: 100px; }
+  .bar-wrap { width: 90px; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; }
+  .bar { height: 100%; border-radius: 3px; }
+  .bar.up { background: #3fb950; }
+  .bar.down { background: #f85149; }
+  .vol { color: #8b949e; font-size: 12px; }
+
+  .loader { text-align: center; padding: 60px; color: #8b949e; }
+  .spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #30363d; border-top-color: #1f6feb; border-radius: 50%; animation: spin .7s linear infinite; margin-bottom: 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .summary { display: flex; gap: 20px; padding: 0 24px 16px; flex-wrap: wrap; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; min-width: 130px; }
+  .card-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+  .card-value { font-size: 18px; font-weight: 700; }
+  .card-value.up { color: #3fb950; }
+  .card-value.down { color: #f85149; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📈 Stock Tracker</h1>
+  <div id="status">Loading… <span id="refresh-countdown"></span></div>
+</header>
+
+<div class="controls">
+  <div class="tabs">
+    <button class="tab active" data-idx="sp500">S&P 500</button>
+    <button class="tab" data-idx="nasdaq100">NASDAQ-100</button>
+    <button class="tab" data-idx="combined">Combined</button>
+  </div>
+  <input id="search" type="text" placeholder="Search ticker or name…">
+  <div id="meta"></div>
+</div>
+
+<div class="summary" id="summary"></div>
+
+<div class="table-wrap">
+  <div class="loader" id="loader">
+    <div class="spinner"></div>
+    <div>Fetching stock data…<br><small>First load takes ~15s for 500 stocks</small></div>
+  </div>
+  <table id="table" style="display:none">
+    <thead>
+      <tr>
+        <th data-col="rank">#<span class="arrow">↕</span></th>
+        <th data-col="ticker">Ticker<span class="arrow">↕</span></th>
+        <th data-col="name">Company<span class="arrow">↕</span></th>
+        <th data-col="price">Price<span class="arrow">↕</span></th>
+        <th data-col="change_abs">Change $<span class="arrow">↕</span></th>
+        <th data-col="change_pct" class="sorted">Change %<span class="arrow">↓</span></th>
+        <th class="bar-cell"></th>
+        <th data-col="volume">Volume<span class="arrow">↕</span></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<script>
+let allStocks = [];
+let sortCol = 'change_pct';
+let sortAsc = false;
+let activeIdx = 'sp500';
+let refreshInterval = 300; // seconds
+let countdown = refreshInterval;
+let timer;
+
+function fmtPct(v) {
+  const sign = v > 0 ? '+' : '';
+  return `${sign}${v.toFixed(2)}%`;
+}
+function fmtPrice(v) { return `$${v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; }
+function fmtVol(v) {
+  if (v >= 1e9) return (v/1e9).toFixed(1)+'B';
+  if (v >= 1e6) return (v/1e6).toFixed(1)+'M';
+  if (v >= 1e3) return (v/1e3).toFixed(0)+'K';
+  return v;
+}
+
+function cls(pct) { return pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat'; }
+
+function renderSummary(stocks) {
+  const gainers = stocks.filter(s => s.change_pct > 0).length;
+  const losers = stocks.filter(s => s.change_pct < 0).length;
+  const avg = stocks.reduce((a,b) => a + b.change_pct, 0) / stocks.length;
+  const top = stocks[0];
+  const bottom = stocks[stocks.length - 1];
+  document.getElementById('summary').innerHTML = `
+    <div class="card"><div class="card-label">Advancing</div><div class="card-value up">${gainers}</div></div>
+    <div class="card"><div class="card-label">Declining</div><div class="card-value down">${losers}</div></div>
+    <div class="card"><div class="card-label">Avg Change</div><div class="card-value ${cls(avg)}">${fmtPct(avg)}</div></div>
+    <div class="card"><div class="card-label">Top Gainer</div><div class="card-value up">${top.ticker} ${fmtPct(top.change_pct)}</div></div>
+    <div class="card"><div class="card-label">Top Loser</div><div class="card-value down">${bottom.ticker} ${fmtPct(bottom.change_pct)}</div></div>
+  `;
+}
+
+function renderTable(stocks) {
+  const maxAbs = Math.max(...stocks.map(s => Math.abs(s.change_pct)));
+  const q = document.getElementById('search').value.toLowerCase();
+  const filtered = q ? stocks.filter(s => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)) : stocks;
+
+  document.getElementById('tbody').innerHTML = filtered.map(s => {
+    const c = cls(s.change_pct);
+    const barW = maxAbs > 0 ? Math.round(Math.abs(s.change_pct) / maxAbs * 90) : 0;
+    return `<tr>
+      <td class="rank">${s.rank}</td>
+      <td class="ticker">${s.ticker}</td>
+      <td class="name" title="${s.name}">${s.name}</td>
+      <td class="price">${fmtPrice(s.price)}</td>
+      <td class="chg ${c}">${s.change_abs >= 0 ? '+' : ''}${s.change_abs.toFixed(2)}</td>
+      <td class="chg ${c}">${fmtPct(s.change_pct)}</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar ${c}" style="width:${barW}px"></div></div></td>
+      <td class="vol">${fmtVol(s.volume)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function sortAndRender() {
+  const sorted = [...allStocks].sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sortAsc ? av - bv : bv - av;
+  });
+  renderTable(sorted);
+}
+
+async function loadData() {
+  document.getElementById('loader').style.display = 'block';
+  document.getElementById('table').style.display = 'none';
+  try {
+    const res = await fetch(`/api/stocks?index=${activeIdx}`);
+    const json = await res.json();
+    allStocks = json.stocks;
+    document.getElementById('meta').textContent = `${json.count} stocks · updated ${json.last_updated}`;
+    document.getElementById('status').innerHTML = `Live <span>●</span>`;
+    renderSummary(allStocks);
+    sortAndRender();
+    document.getElementById('loader').style.display = 'none';
+    document.getElementById('table').style.display = 'table';
+  } catch(e) {
+    document.getElementById('loader').innerHTML = `<p style="color:#f85149">Error loading data. Retrying…</p>`;
+  }
+  countdown = refreshInterval;
+}
+
+function startCountdown() {
+  clearInterval(timer);
+  timer = setInterval(() => {
+    countdown--;
+    const m = Math.floor(countdown/60), s = countdown%60;
+    document.getElementById('refresh-countdown').textContent = `Refreshing in ${m}:${s.toString().padStart(2,'0')}`;
+    if (countdown <= 0) loadData();
+  }, 1000);
+}
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    activeIdx = btn.dataset.idx;
+    loadData();
+  });
+});
+
+// Search
+document.getElementById('search').addEventListener('input', sortAndRender);
+
+// Column sorting
+document.querySelectorAll('thead th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (sortCol === col) { sortAsc = !sortAsc; }
+    else { sortCol = col; sortAsc = col === 'ticker' || col === 'name'; }
+    document.querySelectorAll('thead th').forEach(t => {
+      t.classList.remove('sorted');
+      const a = t.querySelector('.arrow');
+      if (a) a.textContent = '↕';
+    });
+    th.classList.add('sorted');
+    const arrow = th.querySelector('.arrow');
+    if (arrow) arrow.textContent = sortAsc ? '↑' : '↓';
+    sortAndRender();
+  });
+});
+
+loadData();
+startCountdown();
+</script>
+</body>
+</html>
