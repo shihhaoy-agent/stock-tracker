@@ -65,45 +65,49 @@ def fetch_stock_data(tickers_with_names: list[tuple[str, str]]) -> list[dict]:
     for i in range(0, len(tickers_with_names), batch_size):
         batch = tickers_with_names[i : i + batch_size]
         tickers = [t[0] for t in batch]
-        try:
-            raw = yf.download(
-                tickers,
-                period="2d",
-                auto_adjust=True,
-                progress=False,
-                threads=False,
-            )
-            for ticker in tickers:
-                try:
-                    if len(tickers) == 1:
-                        close_s = raw["Close"].dropna()
-                        vol_s = raw["Volume"].dropna()
-                    else:
-                        close_s = raw["Close"][ticker].dropna()
-                        vol_s = raw["Volume"][ticker].dropna()
+        # Retry up to 3 times on rate limit
+        for attempt in range(3):
+            try:
+                raw = yf.download(
+                    tickers,
+                    period="2d",
+                    auto_adjust=True,
+                    progress=False,
+                    threads=False,
+                )
+                for ticker in tickers:
+                    try:
+                        if len(tickers) == 1:
+                            close_s = raw["Close"].dropna()
+                            vol_s = raw["Volume"].dropna()
+                        else:
+                            close_s = raw["Close"][ticker].dropna()
+                            vol_s = raw["Volume"][ticker].dropna()
 
-                    if len(close_s) < 2:
+                        if len(close_s) < 2:
+                            continue
+
+                        prev = float(close_s.iloc[-2])
+                        curr = float(close_s.iloc[-1])
+                        pct = (curr - prev) / prev * 100
+                        vol = int(vol_s.iloc[-1]) if len(vol_s) else 0
+
+                        results.append({
+                            "ticker": ticker,
+                            "name": names.get(ticker, ticker),
+                            "price": round(curr, 2),
+                            "prev_close": round(prev, 2),
+                            "change_abs": round(curr - prev, 2),
+                            "change_pct": round(pct, 2),
+                            "volume": vol,
+                        })
+                    except Exception:
                         continue
-
-                    prev = float(close_s.iloc[-2])
-                    curr = float(close_s.iloc[-1])
-                    pct = (curr - prev) / prev * 100
-                    vol = int(vol_s.iloc[-1]) if len(vol_s) else 0
-
-                    results.append({
-                        "ticker": ticker,
-                        "name": names.get(ticker, ticker),
-                        "price": round(curr, 2),
-                        "prev_close": round(prev, 2),
-                        "change_abs": round(curr - prev, 2),
-                        "change_pct": round(pct, 2),
-                        "volume": vol,
-                    })
-                except Exception:
-                    continue
-            del raw  # free memory before next batch
-        except Exception:
-            continue
+                del raw
+                time.sleep(1)  # avoid rate limiting between batches
+                break
+            except Exception:
+                time.sleep(3 * (attempt + 1))  # back off on failure
 
     results.sort(key=lambda x: x["change_pct"], reverse=True)
     for i, r in enumerate(results, 1):
@@ -141,6 +145,23 @@ def stocks():
         "count": len(data),
         "last_updated": time.strftime("%Y-%m-%d %H:%M:%S"),
     })
+
+
+def _prewarm():
+    """Fetch S&P 500 and NASDAQ-100 data in the background on startup."""
+    time.sleep(2)  # let gunicorn finish booting
+    for idx in ("sp500", "nasdaq100"):
+        try:
+            if idx == "sp500":
+                tickers = get_cached("sp500_tickers", 86_400, fetch_sp500_tickers)
+            else:
+                tickers = get_cached("nasdaq100_tickers", 86_400, fetch_nasdaq100_tickers)
+            get_cached(f"data_{idx}", 300, lambda t=tickers: fetch_stock_data(t))
+        except Exception:
+            pass
+
+
+threading.Thread(target=_prewarm, daemon=True).start()
 
 
 if __name__ == "__main__":
