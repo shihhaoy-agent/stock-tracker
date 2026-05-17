@@ -58,44 +58,50 @@ def fetch_nasdaq100_tickers() -> list[tuple[str, str]]:
 
 
 def fetch_stock_data(tickers_with_names: list[tuple[str, str]]) -> list[dict]:
-    tickers = [t[0] for t in tickers_with_names]
     names = {t[0]: t[1] for t in tickers_with_names}
-
-    raw = yf.download(
-        tickers,
-        period="2d",
-        auto_adjust=True,
-        progress=False,
-        threads=True,
-    )
-
     results = []
-    for ticker in tickers:
+    batch_size = 50  # keeps peak memory under 512MB on Render free tier
+
+    for i in range(0, len(tickers_with_names), batch_size):
+        batch = tickers_with_names[i : i + batch_size]
+        tickers = [t[0] for t in batch]
         try:
-            if len(tickers) == 1:
-                close_series = raw["Close"].dropna()
-                vol_series = raw["Volume"].dropna()
-            else:
-                close_series = raw["Close"][ticker].dropna()
-                vol_series = raw["Volume"][ticker].dropna()
+            raw = yf.download(
+                tickers,
+                period="2d",
+                auto_adjust=True,
+                progress=False,
+                threads=False,
+            )
+            for ticker in tickers:
+                try:
+                    if len(tickers) == 1:
+                        close_s = raw["Close"].dropna()
+                        vol_s = raw["Volume"].dropna()
+                    else:
+                        close_s = raw["Close"][ticker].dropna()
+                        vol_s = raw["Volume"][ticker].dropna()
 
-            if len(close_series) < 2:
-                continue
+                    if len(close_s) < 2:
+                        continue
 
-            prev = float(close_series.iloc[-2])
-            curr = float(close_series.iloc[-1])
-            pct = (curr - prev) / prev * 100
-            vol = int(vol_series.iloc[-1]) if len(vol_series) else 0
+                    prev = float(close_s.iloc[-2])
+                    curr = float(close_s.iloc[-1])
+                    pct = (curr - prev) / prev * 100
+                    vol = int(vol_s.iloc[-1]) if len(vol_s) else 0
 
-            results.append({
-                "ticker": ticker,
-                "name": names.get(ticker, ticker),
-                "price": round(curr, 2),
-                "prev_close": round(prev, 2),
-                "change_abs": round(curr - prev, 2),
-                "change_pct": round(pct, 2),
-                "volume": vol,
-            })
+                    results.append({
+                        "ticker": ticker,
+                        "name": names.get(ticker, ticker),
+                        "price": round(curr, 2),
+                        "prev_close": round(prev, 2),
+                        "change_abs": round(curr - prev, 2),
+                        "change_pct": round(pct, 2),
+                        "volume": vol,
+                    })
+                except Exception:
+                    continue
+            del raw  # free memory before next batch
         except Exception:
             continue
 
