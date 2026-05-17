@@ -54,6 +54,7 @@
   .loader { text-align: center; padding: 60px; color: #8b949e; }
   .spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #30363d; border-top-color: #1f6feb; border-radius: 50%; animation: spin .7s linear infinite; margin-bottom: 12px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  #loading-msg { color: #8b949e; margin-top: 8px; font-size: 13px; }
 
   .summary { display: flex; gap: 20px; padding: 0 24px 16px; flex-wrap: wrap; }
   .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; min-width: 130px; }
@@ -85,7 +86,8 @@
 <div class="table-wrap">
   <div class="loader" id="loader">
     <div class="spinner"></div>
-    <div>Fetching stock data…<br><small>First load takes ~15s for 500 stocks</small></div>
+    <div>Fetching stock data…</div>
+    <div id="loading-msg">First load takes ~2 minutes. Page will update automatically.</div>
   </div>
   <table id="table" style="display:none">
     <thead>
@@ -172,12 +174,28 @@ function sortAndRender() {
   renderTable(sorted);
 }
 
+let loadingPoll = null;
+
 async function loadData() {
-  document.getElementById('loader').style.display = 'block';
-  document.getElementById('table').style.display = 'none';
   try {
     const res = await fetch(`/api/stocks?index=${activeIdx}`);
     const json = await res.json();
+
+    if (json.loading) {
+      // Data not ready yet — show loader and poll every 10s
+      document.getElementById('loader').style.display = 'block';
+      document.getElementById('table').style.display = 'none';
+      document.getElementById('loading-msg').textContent = json.message || 'Fetching… will update automatically.';
+      document.getElementById('status').innerHTML = `Loading…`;
+      if (!loadingPoll) {
+        loadingPoll = setInterval(loadData, 10000);
+      }
+      return;
+    }
+
+    // Data ready
+    clearInterval(loadingPoll);
+    loadingPoll = null;
     allStocks = json.stocks;
     document.getElementById('meta').textContent = `${json.count} stocks · updated ${json.last_updated}`;
     document.getElementById('status').innerHTML = `Live <span>●</span>`;
@@ -186,7 +204,10 @@ async function loadData() {
     document.getElementById('loader').style.display = 'none';
     document.getElementById('table').style.display = 'table';
   } catch(e) {
-    document.getElementById('loader').innerHTML = `<p style="color:#f85149">Error loading data. Retrying…</p>`;
+    document.getElementById('status').innerHTML = `Retrying…`;
+    if (!loadingPoll) {
+      loadingPoll = setInterval(loadData, 10000);
+    }
   }
   countdown = refreshInterval;
 }
